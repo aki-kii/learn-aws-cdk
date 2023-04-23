@@ -1,17 +1,71 @@
+import { Template, Capture } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib';
-import { Template, Match } from 'aws-cdk-lib/assertions';
-import * as CdkWorkshop from '../lib/cdk-workshop-stack';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { HitCounter } from '../lib/hitcounter';
 
-test('SQS Queue and SNS Topic Created', () => {
-  const app = new cdk.App();
-  // WHEN
-  const stack = new CdkWorkshop.CdkWorkshopStack(app, 'MyTestStack');
-  // THEN
-
-  const template = Template.fromStack(stack);
-
-  template.hasResourceProperties('AWS::SQS::Queue', {
-    VisibilityTimeout: 300
-  });
-  template.resourceCountIs('AWS::SNS::Topic', 1);
+test('DynamoDB Table Created With Encryption', () => {
+    const stack = new cdk.Stack();
+    // WHEN
+    new HitCounter(stack, 'MyTestConstruct', {
+        downstream: new lambda.Function(stack, 'TestFunction', {
+            runtime: lambda.Runtime.PYTHON_3_9,
+            handler: 'hello.lambda_handler',
+            code: lambda.Code.fromAsset('src/lambda')
+        })
+    });
+    // THEN
+    const template = Template.fromStack(stack);
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+        SSESpecification: {
+            SSEEnabled: true
+        }
+    });
 });
+
+test('read capacity can be configured', () => {
+    const stack = new cdk.Stack();
+
+    expect(() => {
+        new HitCounter(stack, 'MyTestConstruct', {
+            downstream: new lambda.Function(stack, 'TestFunction', {
+                runtime: lambda.Runtime.PYTHON_3_9,
+                handler: 'hello.lambda_handler',
+                code: lambda.Code.fromAsset('src/lambda')
+            }),
+            readCapacity: 3
+        });
+    }).toThrowError(/readCapacity must be greater than 5 and less than 20/);
+});
+
+test('Lambda Has Environment Variables', () => {
+    const stack = new cdk.Stack();
+    // WHEN
+    new HitCounter(stack, 'MyTestConstruct', {
+        downstream: new lambda.Function(stack, 'TestFunction', {
+            runtime: lambda.Runtime.PYTHON_3_9,
+            handler: 'hello.lambda_handler',
+            code: lambda.Code.fromAsset('src/lambda')
+        })
+    });
+    // THEN
+    const template = Template.fromStack(stack);
+    const envCapture = new Capture();
+    template.hasResourceProperties("AWS::Lambda::Function", {
+        Environment: envCapture,
+    });
+
+    expect(envCapture.asObject()).toEqual(
+        {
+            Variables: {
+                DOWNSTREAM_FUNCTION_NAME: {
+                    Ref: "TestFunction22AD90FC",
+                },
+                HITS_TABLE_NAME: {
+                    Ref: "MyTestConstructHits24A357F0"
+                },
+            },
+        }
+    )
+});
+
+
